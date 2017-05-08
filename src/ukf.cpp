@@ -66,19 +66,27 @@ UKF::UKF() {
   n_aug_ = 7;
 
   // Lambda - sigma points spreading parameter
-  lambda_ = 3 - n_x_;
+  lambda_ = 3 - n_aug_;
 
   // Predicted sigma points matrix
   Xsig_pred_ = MatrixXd(n_x_, 2 * n_aug_ + 1);
-
-  //Weights vector (mean and covariance predicton)
-  weights_ = VectorXd(2 * n_aug_ + 1);
 
   // Radar NIS 
   NIS_radar_ = 0.0;
 
   // Laser NIS
   NIS_laser_ = 0.0;
+
+  //Weights vector (mean and covariance predicton)
+  weights_ = VectorXd(2 * n_aug_ + 1);
+
+  // set weights
+  double weight_0 = lambda_ / (lambda_ + n_aug_);
+  weights_(0) = weight_0;
+  for (int i = 1; i < 2 * n_aug_ + 1; i++) {  //2n+1 weights
+    double weight = 0.5 / (n_aug_ + lambda_);
+    weights_(i) = weight;
+  }
 }
 
 UKF::~UKF() {}
@@ -113,8 +121,8 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
       x_ << 1, 1, 1, 1, 1;
 
       // Covariance matrix initialization
-      P_ << std_laspx_, 0, 0, 0, 0,
-            0, std_laspy_, 0, 0, 0,
+      P_ << std_laspx_*std_laspx_, 0, 0, 0, 0,
+            0, std_laspy_*std_laspy_, 0, 0, 0,
             0, 0, 1, 0, 0,
             0, 0, 0, 1, 0,
             0, 0, 0, 0, 1;
@@ -192,9 +200,6 @@ void UKF::Prediction(double delta_t) {
   //create sigma point matrix
   MatrixXd Xsig_aug = MatrixXd(n_aug_, 2 * n_aug_ + 1);
 
-  //define spreading parameter
-  lambda_ = 3 - n_aug_;
-
   //create augmented mean state
   x_aug.head(5) = x_;
   x_aug(5) = 0;
@@ -211,10 +216,11 @@ void UKF::Prediction(double delta_t) {
 
   //create augmented sigma points
   Xsig_aug.col(0) = x_aug;
+  double sqrt_lambda_n_aug_ = sqrt(lambda_ + n_aug_);
   for (int i = 0; i< n_aug_; i++)
   {
-    Xsig_aug.col(i + 1) = x_aug + sqrt(lambda_ + n_aug_) * L.col(i);
-    Xsig_aug.col(i + 1 + n_aug_) = x_aug - sqrt(lambda_ + n_aug_) * L.col(i);
+    Xsig_aug.col(i + 1) = x_aug + sqrt_lambda_n_aug_ * L.col(i);
+    Xsig_aug.col(i + 1 + n_aug_) = x_aug - sqrt_lambda_n_aug_ * L.col(i);
   }
 
   /*****************************************************************************
@@ -230,8 +236,8 @@ void UKF::Prediction(double delta_t) {
     double v        = Xsig_aug(2, i);
     double yaw      = Xsig_aug(3, i);
     double yawd     = Xsig_aug(4, i);
-    double nu_a     = Xsig_aug(5, i);
-    double nu_yawdd = Xsig_aug(6, i);
+    const double nu_a     = Xsig_aug(5, i);
+    const double nu_yawdd = Xsig_aug(6, i);
 
     //predicted state values
     double px_p, py_p;
@@ -273,12 +279,7 @@ void UKF::Prediction(double delta_t) {
   ****************************************************************************/
 
   // set weights
-  double weight_0 = lambda_ / (lambda_ + n_aug_);
-  weights_(0) = weight_0;
-  for (int i = 1; i < 2 * n_aug_ + 1; i++) {  //2n+1 weights
-    double weight = 0.5 / (n_aug_ + lambda_);
-    weights_(i) = weight;
-  }
+  // moved to the constructor	  
 
   //predicted state mean
   x_.fill(0.0);             
@@ -316,7 +317,11 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
   */
 
   /*****************************************************************************
-  *  Step 1 - Predict Measurement for Lidar
+  *  UKF is not necessary because the model is linear (Kalman Filter)
+  ****************************************************************************/
+
+  /*****************************************************************************
+  *  Step 1 - Predict Measurement for Lidar 
   ****************************************************************************/
 
   //extract measurement as VectorXd
@@ -439,8 +444,8 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
 
     // measurement model
     Zsig(0, i) = sqrt(p_x*p_x + p_y*p_y);                        			//r
-    Zsig(1, i) = atan2(p_y, p_x);                                 			//phi
-    Zsig(2, i) = (p_x*v1 + p_y*v2) / sqrt(p_x*p_x + p_y*p_y);   			//r_dot
+    Zsig(1, i) = ((fabs(p_x) != 0) && (fabs(p_y) != 0)) ? atan2(p_y, p_x) : 0.0;	//phi
+    Zsig(2, i) = (p_x*v1 + p_y*v2) / std::max(sqrt(p_x*p_x + p_y*p_y),0.001);		//r_dot
   }
 
   //mean predicted measurement
